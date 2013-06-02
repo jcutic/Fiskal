@@ -1,0 +1,127 @@
+package hr.fiskalizacija;
+
+import java.io.FileInputStream;
+import java.security.KeyStore;
+
+import javax.xml.soap.SOAPMessage;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import hr.model.bussinessArea.CertParameters;
+
+/**
+ * Klasa koja je suèelje prema korisniku librarya, kreiranjem objekta ove klase mogu se
+ * koristiti sve funkcionalnosti librarya
+ * Prije pokretanja metoda za prijavu poslovnog prostora potrebno je postaviti:
+ * 	- 
+ * 
+ * Prije fiskaliziranja raèuna, potrebno je postaviti:
+ * 	-
+ *  
+ */
+public class Fiscalization extends CertParameters{
+	
+	private static final Logger LOG = LoggerFactory.getLogger(Fiscalization.class);
+	
+	/**
+	 * Konstruktor za kreiranje objekta klase Fiscalization kada još nije 
+	 * kreiran .jks keystore ili ako unutar .jks keystorea ima samo jedan alias
+	 * za par privatni kljuè - certifikat
+	 * 
+	 * */
+	public Fiscalization(String filePath, String fileName, String password) {
+		super(filePath, fileName, password);
+		LOG.info("Kreiranje objekta klase Fiscalization sa 3 parametra.");
+	}
+
+	
+	/**
+	 * Konstruktor za kreiranje objekta klase Fiscalization kada ima više 
+	 * aliasa za par privatni kljuè - certifikat .jks
+	 * Potrebno je definirati alias s kojim æe se privatnim kljuèem potpisivati
+	 * 
+	 * @param filePath
+	 * @param fileName
+	 * @param password
+	 * @param aliasForCertInJKS
+	 */
+	public Fiscalization(String filePath, String fileName, String password, String aliasForCertInJKS) {
+		super(filePath, fileName, password, aliasForCertInJKS);
+		LOG.info("Kreiranje objekta klase Fiscalization sa 4 parametra.");
+	}
+	
+	
+	/**
+	 * Metoda za konverziju PFX keystorea i SSL certifikata za komunikaciju u JKS keystore
+	 * Poziva se samo jednom, prije potpisivanja SOAP poruke
+	 * Za defautno korištenje potrebno je postaviti da oba certifikata budu istog naziva (npr. FiskalCert.cer i FiskalCert.pfx) 
+	 * i u istom direktoriju (imaju istu putanju)
+	 * Defaultne vrijednosti (password, putanja, naziv) æe biti iste kao i prilikom kreiranje objekta   
+	 * Ako nemaju istu putanju ili naziv, moguæe je postaviti sve vrijednosti setterima nakon kreiranja objekta klase Fiskalization.
+	 *
+	 * @param fiskal
+	 * @return broj unesenih certifikata u JKS keystore
+	 */
+	public static int convertFromPKCSAndSSLToJKS(Fiscalization fiskal){
+		return PrepareCertificate.convertFromPKCSAndSSLToJKS(fiskal);
+	}
+	
+	
+	/**
+	 * Slalje Echo poruke prema web servisu porezne uprave
+	 * Echo poruka provjerava da li je moguæe uspostaviti komunikaciju s web servisom
+	 * 
+	 * Vraæa odgovor web servisa u obliku stringa
+	 * 
+	 * @param fiskal
+	 * @return
+	 */
+	public String sendEchoMessage(Fiscalization fiskal){
+		return writeSoap(new Connections(null, 0, 0).sendSoapMessage(new CreateXmls().createEchoMessage(), this));
+	}
+	
+	
+	/**
+	 * Prijava poslovnog prostora, potrebno je kreirati objekte klasa koje su potrebne za kreiranje XML-a
+	 * Metoda:
+	 * 	- kreira XML iz podataka unesenih u objekte klase
+	 * 	- kreira SOAP poruku
+	 * 	- potpisuje SOAP poruku
+	 * 	- šalje SOAP poruku prema web servisu porezne uprave 
+	
+	 * @param fiskal
+	 * @param objectForCreateXml
+	 * @return odgovor od web servisa porezne uprave kao string
+	 */
+	public SOAPMessage sendSoap(Fiscalization fiskal, Object objectForCreateXml){
+		SOAPMessage soapMessage = new Connections(null, 0, 0).sendSoapMessage(new SignVerify().signSoap(new CreateXmls().createSoapMessage(new CreateXmls().createXmlForRequest(objectForCreateXml)), this), this);
+		
+		// Potrebno je preuzeti sve dijelove SOAP poruke u objekt klase koja za sada još nije kreirana s JAXB-em
+		
+		if(new SignVerify().verifyMessage(soapMessage)){
+			LOG.info("SOAP poruka koju je poslao servis Porezne uprave je pravilno potpisana.");
+		}else{
+			LOG.error("Neispravan digitalni potpis.");
+		}
+		return  soapMessage;
+	}
+	
+	/**
+	 * Metoda za preuzimanje OIB-a iz certifikata 
+	 * 
+	 * @param fiskal
+	 * @return
+	 */
+	public String getOIBFromCert(Fiscalization fiskal){
+		String oib = null;
+		try {
+			KeyStore keyStoreJKS = KeyStore.getInstance(KEYSTORE_TYPE_JKS);
+			keyStoreJKS.load(new FileInputStream(getPathOfJKSCert() + getNameOfJKSCert() + EXTENSION_OF_JKS), getPasswdOfJKSCert().toCharArray());
+			oib = getOIBFromCert(keyStoreJKS, getAliasForPairJKSCert());
+		} catch (Exception e) {
+			LOG.error("Exception", e);
+		}
+		return oib;
+	}
+}
